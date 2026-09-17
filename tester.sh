@@ -18,10 +18,17 @@ nc = '\033[0m'
 FLAGS = ['', '-a', '-g', '-u', '-r', '-p']
 
 
+# WHY THIS CHANGED: this used to slice parts[1:3] -- columns 2 (type)
+# and 3 (name) only, silently dropping column 1 (the address). That
+# meant this entire test suite could never have caught the "addresses
+# printed in decimal instead of hex" bug (src/utils/print_utils.c),
+# because the one column that bug affected was never compared. Fixed
+# to compare all three columns (parts[0:3]) -- see the "fix(print):
+# hex addresses" commit for the bug this was hiding.
 def run_nm(cmd, args):
     """
     Run the given command (`nm` or ft_nm) with provided args list.
-    Returns a list of strings containing columns 2 and 3 of each line.
+    Returns a list of strings containing columns 1-3 of each line.
     """
     try:
         res = subprocess.run([cmd] + args,
@@ -29,8 +36,7 @@ def run_nm(cmd, args):
                              stderr=subprocess.DEVNULL,
                              check=False,
                              text=True)
-        # take columns 2 and 3 (indexes 1 and 2) of each line
-        lines = [ ' '.join(parts[1:3]) for parts in (line.split() for line in res.stdout.splitlines()) if len(parts) >= 3 ]
+        lines = [ ' '.join(parts[0:3]) for parts in (line.split() for line in res.stdout.splitlines()) if len(parts) >= 3 ]
         return lines
     except Exception:
         return []
@@ -55,9 +61,10 @@ def run_test(ft_nm, file, flag, counters, fail_list):
     sys_lines = [line for line in sys_res.stdout.splitlines() if 'plugin:' not in line and len(line.strip().split()) >= 3]
     ft_lines  = [line for line in ft_res.stdout.splitlines() if 'plugin:' not in line and len(line.strip().split()) >= 3]
 
-    # Extract only columns 2 and 3
-    sys_out = [' '.join(line.strip().split()[1:3]) for line in sys_lines]
-    ft_out  = [' '.join(line.strip().split()[1:3]) for line in ft_lines]
+    # Extract columns 1 (address), 2 (type) and 3 (name) -- see the
+    # comment on run_nm() above for why column 1 has to be included.
+    sys_out = [' '.join(line.strip().split()[0:3]) for line in sys_lines]
+    ft_out  = [' '.join(line.strip().split()[0:3]) for line in ft_lines]
 
     if sys_out == ft_out:
         counters['pass'] += 1
