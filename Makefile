@@ -25,8 +25,18 @@ SUBMODLIB	= ./libft/libft.a
 #================================= GCC ==================================#
 
 # GCC WITH LIBS AND INCLUDES
+# -Wall -Wextra -Werror were commented out in the intra submission, so
+# the grading/default build never saw a single compiler warning even
+# though none of the crashes above were warning-detectable anyway
+# (they're all logic bugs -- unchecked syscall returns, missing bounds
+# checks -- not the kind of thing -Wall catches). Turned on by default
+# so future changes to this project don't regress silently; the whole
+# codebase already compiles clean under this. -fsanitize=address is
+# left off by default on purpose: it's a debugging aid for finding
+# bugs like the ones documented in README.md, not something you want
+# slowing down the binary that actually gets submitted/graded.
 CFLAGS		=# -fsanitize=address
-CFLAGS	   +=# -Wall -Wextra -Werror
+CFLAGS	   += -Wall -Wextra -Werror
 CC			= gcc $(CFLAGS) $(INC)
 
 #================================= SCRS =================================#
