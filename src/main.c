@@ -152,36 +152,84 @@ static int	warn_directory(char *file)
 	     same function and the same subject requirement about validating
 	     every parsed value against a reference.
 */
+/*
+	NEW FUNCTION -- did not exist in the intra submission. See the big
+	comment on ft_nm() below for why it's needed: it's the counterpart
+	to warn_directory() for every OTHER non-regular file type (FIFO,
+	socket, character/block device).
+*/
+static int	warn_not_ordinary(char *file)
+{
+	write(2, "nm: Warning: '", 14);
+	write(2, file, ft_strlen(file));
+	write(2, "' is not an ordinary file\n", 27);
+	return 1;
+}
+
+/*
+	WHY THIS CHANGED
+	-----------------
+	Even after the earlier mmap/fstat pass, this function still called
+	`open(file, O_RDONLY)` completely unconditionally as its very first
+	syscall. Opening a FIFO for reading BLOCKS the calling process until
+	a writer opens the other end -- so `./ft_nm some_named_pipe` doesn't
+	crash, it just hangs forever (reproduced: `mkfifo p && ./ft_nm p`
+	had to be killed with `timeout`). Real nm doesn't have this problem
+	because it checks the file's type BEFORE opening it, and rejects
+	anything that isn't a regular file with a specific warning message
+	(`nm: Warning: 'x' is not an ordinary file`) instead of trying to
+	read it at all.
+
+	Fixed by reordering: call stat() (not fstat(), and not after open())
+	FIRST, classify the file type from that result, and only call
+	open() once we already know it's safe to (S_ISREG). The directory
+	check that used to live after open()+fstat() moved up here too, for
+	the same reason -- it's cheaper and safer to decide "should I even
+	try to open this" before opening it, not after.
+
+	SUBJECT COMPLIANCE
+	-------------------
+	"In no way can your program quit in an unexpected manner
+	(Segmentation fault, bus error, double free, etc.)." A hang is
+	arguably a worse failure mode than a crash for a program that's
+	going to be run non-interactively during grading/defense: a
+	segfault terminates immediately and shows up in the exit code; a
+	hang just sits there until something external (a timeout, a bored
+	human hitting Ctrl-C) kills it. "Never crash" has to be read as
+	"never crash, and never hang" for this to actually hold.
+
+	OLD vs NEW
+	----------
+	Old: open() first (blocks forever on a FIFO), THEN fstat() to find
+	     out what kind of file was just (maybe) opened.
+	New: stat() first (never blocks -- it only reads metadata, it
+	     doesn't open anything), classify the file type, reject
+	     directories and anything non-regular, and only call open() on
+	     a file already proven to be a plain regular file.
+*/
 int	ft_nm(char *file, t_flags flags, int multiple)
 {
 	if (file[0] == '-')
 		return 0;
 
-	int fd = open(file, O_RDONLY);
-	if (fd < 0)
-		return error(file, "No such file", 1);
-
 	struct stat st;
-	if (fstat(fd, &st) < 0)
-	{
-		close(fd);
+	if (stat(file, &st) < 0)
 		return error(file, "No such file", 1);
-	}
 	if (S_ISDIR(st.st_mode))
-	{
-		close(fd);
 		return warn_directory(file);
-	}
+	if (!S_ISREG(st.st_mode))
+		return warn_not_ordinary(file);
 	/* Reject anything smaller than the smallest possible ELF header
 	   (32-bit) up front. This also covers the empty-file case (size 0)
 	   without needing a separate check, and it means process_elf32()
 	   never has to worry about ehdr->e_ident being partially out of the
 	   mapped file. */
 	if (st.st_size <= 0 || (size_t)st.st_size < sizeof(Elf32_Ehdr))
-	{
-		close(fd);
 		return error(file, "file format not recognized", 0);
-	}
+
+	int fd = open(file, O_RDONLY);
+	if (fd < 0)
+		return error(file, "No such file", 1);
 
 	void *mapped = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 	close(fd);
