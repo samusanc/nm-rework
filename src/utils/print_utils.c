@@ -85,14 +85,44 @@ void	print_content(t_header *content, int is_64, char flag)
 	if (flag == 'g')
 		if (content->type_char == 't' || content->type_char == 'd' || content->type_char == 'b' || content->type_char == 'r')
 			return ;
-	if (content->addr || 
-		content->type_char == 'T' || 
-		content->type_char == 't' || 
-		content->type_char == 'a' || 
-		content->type_char == 'N' || 
-		content->type_char == 'b' || 
-		content->type_char == 'D' || 
-		content->type_char == 'r')
+	/*
+		WHY THIS CHANGED
+		-----------------
+		Old condition was a POSITIVE WHITELIST of type letters that get
+		an address printed even when the value is 0
+		(T/t/a/N/b/D/r, plus "any type if addr != 0"). It's incomplete:
+		'd' (local data), 'R' (global read-only), 'A' (global absolute),
+		'c'/'C' (common) are all missing. A symbol of one of THOSE types
+		whose value happens to be exactly 0 fell into the `else` branch
+		below and printed blank padding instead of an address.
+		Reproduced on a real compiled .o file: a `.data`-section local
+		symbol at address 0 -- real nm printed
+		`00000000 d .data`, the old code printed `d .data` (blank).
+
+		Fixed by inverting the logic to a BLACKLIST of the only two
+		types that genuinely have no address to show: 'U' (undefined)
+		and 'w' (weak-undefined) -- an undefined symbol has no value by
+		definition, which is the one case real nm actually leaves blank.
+		Every other type, including a legitimately zero-valued one, now
+		gets its address printed.
+
+		SUBJECT COMPLIANCE
+		-------------------
+		"Output is to be similar to nm on the symbols list (order,
+		offset, padding...)." -- silently blanking out a real (if zero)
+		address for certain symbol types is exactly the kind of output
+		mismatch this line is about.
+
+		OLD vs NEW
+		----------
+		Old: enumerate every type that SHOULD get an address (easy to
+		     leave one out, and it fails silently -- no warning, no
+		     crash, just a wrong-looking but plausible line of output).
+		New: enumerate the two types that should NOT (a much smaller,
+		     closed set, per the ELF spec: only undefined symbols lack
+		     a meaningful value).
+	*/
+	if (content->type_char != 'U' && content->type_char != 'w')
 	{
 		if (ft_strcmp(content->name, ".comment") == 0)
 			content->type_char = 'n';
