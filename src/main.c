@@ -272,22 +272,80 @@ int	main(int argc, char **argv)
 		print_help();
 		return 1;
 	}
-	if (argc == (flags.total + 1))
-	{
-		if (argc > (flags.total + 1))
-			error_counter += ft_nm("a.out", flags, 0);
-		else
-			error_counter += ft_nm("a.out", flags, 1);
-	}
+	/*
+		WHY THIS CHANGED
+		-----------------
+		Real `nm` prints a `\nfilename:\n` header before each file's
+		symbol list ONLY when 2+ files are given on the command line --
+		verified directly: `nm a.o` and `nm` (implicit a.out) print no
+		header; `nm a.o b.o` prints one before each file's block.
+
+		The old code computed the "multiple" flag (the 3rd argument to
+		ft_nm(), which controls whether that header gets printed) with
+		two nested ifs that both tested the exact same condition,
+		`argc > (flags.total + 1)`:
+
+		    if (argc == (flags.total + 1))            // no explicit files
+		    {
+		        if (argc > (flags.total + 1))          // ALWAYS FALSE here
+		            ft_nm("a.out", flags, 0);
+		        else
+		            ft_nm("a.out", flags, 1);          // always taken
+		    }
+		    else                                        // 1+ explicit files
+		    {
+		        for (...) {
+		            if (argc > (flags.total + 1))      // ALWAYS TRUE here
+		                ft_nm(argv[i], flags, 0);       // always taken
+		            else
+		                ft_nm(argv[i], flags, 1);
+		        }
+		    }
+
+		Inside the outer `if` branch, the inner condition can never be
+		true (we're already inside `argc == flags.total + 1`, so `argc >
+		flags.total + 1` is a contradiction) -- meaning the implicit
+		a.out default ALWAYS got `multiple = 1` (header ON). Inside the
+		outer `else` branch, the inner condition is always true for the
+		same reason -- meaning EVERY explicit-file run, whether 1 file
+		or 10, ALWAYS got `multiple = 0` (header OFF). Both are exactly
+		backwards from real nm. Reproduced directly:
+		`nm a.o b.o` (real) prints headers; old `ft_nm a.o b.o` printed
+		none; `nm` with no args (real) prints no header;
+		old `ft_nm` with no args incorrectly printed one before a.out.
+
+		This bug is a good example of why the ORIGINAL logic went
+		unnoticed for so long: it happened to be right for the single
+		most common case people actually test by hand (one explicit
+		file -> no header), purely by accident of the double-negation
+		cancelling out in that one branch.
+
+		SUBJECT COMPLIANCE
+		-------------------
+		"Output is to be similar to nm on the symbols list (order,
+		offset, padding...)." Running nm against more than one file is
+		a completely ordinary use case, not an edge case, and this bug
+		meant every multi-file invocation produced visibly wrong output.
+
+		OLD vs NEW
+		----------
+		Old: "multiple" re-derived twice through the same comparison,
+		     with the two branches producing opposite (and both wrong)
+		     answers.
+		New: computed once, directly, from what it's actually supposed
+		     to mean: `file_count = argc - 1 - flags.total` is exactly
+		     how many non-flag file arguments were given (0 meaning "use
+		     the implicit a.out"), and `multiple = file_count > 1` is
+		     the literal definition of "2 or more files".
+	*/
+	int file_count = argc - 1 - flags.total;
+	int multiple = (file_count > 1);
+	if (file_count <= 0)
+		error_counter += ft_nm("a.out", flags, 0);
 	else
 	{
-		for (int i = 1; i < argc; i++) {
-			if (argc > (flags.total + 1))
-				error_counter += ft_nm(argv[i], flags, 0);
-			else
-				error_counter += ft_nm(argv[i], flags, 1);
-
-		}
+		for (int i = 1; i < argc; i++)
+			error_counter += ft_nm(argv[i], flags, multiple);
 	}
 	return error_counter;
 }
