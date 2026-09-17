@@ -1,0 +1,6 @@
+services:
+  nm:
+    container_name: nm
+    build: ./docker
+    volumes:
+      - ./:/app
