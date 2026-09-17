@@ -280,6 +280,28 @@ int	process_elf64(void *mapped, t_list *output, size_t file_size, char *file)
 	for (size_t i = 0; i < num_symbols; i++) {
 		Elf64_Sym sym = symbols[i];
 		unsigned char st_type = ELF64_ST_TYPE(sym.st_info);
+		/*
+			WHY THIS CHECK EXISTS
+			-----------------------
+			Index 0 of every ELF symtab is a reserved, all-zero "null"
+			entry (name/value/size/info all 0, st_shndx == SHN_UNDEF).
+			Under normal (non -a) output it's correctly invisible --
+			it falls into the `sym.st_name == 0 -> continue` branch
+			below like any other nameless symbol. But real nm's -a
+			flag ("Display debugger-only symbols") surfaces this exact
+			entry as an empty-named ABSOLUTE symbol ('a'), not as 'U'
+			(which is what get_symbol_type_x64() would normally return
+			for SHN_UNDEF + STB_LOCAL). This is a libbfd implementation
+			quirk, not something derivable from the ELF spec, and it
+			ONLY happens for linked files (exe/.so) -- verified against
+			real nm that a plain relocatable .o does NOT get this
+			extra line under -a. Reproduced/matched by diffing
+			`nm -a` against `ft_nm -a` on real 32-bit and 64-bit
+			exe/.o/.so files until every one matched byte-for-byte.
+		*/
+		int is_reserved_null = (i == 0 && sym.st_name == 0 && sym.st_value == 0
+			&& sym.st_shndx == SHN_UNDEF && st_type == STT_NOTYPE
+			&& ehdr->e_type != ET_REL);
 
 		const char *name;
 		if (st_type == STT_SECTION) {
@@ -288,6 +310,8 @@ int	process_elf64(void *mapped, t_list *output, size_t file_size, char *file)
 			if (sym.st_shndx >= ehdr->e_shnum)
 				continue;
 			name = safe_str(shstrtab, shdr[sym.st_shndx].sh_name, shstrtab_size);
+		} else if (is_reserved_null) {
+			name = "";
 		} else {
 			if (sym.st_name == 0)
 				continue;
@@ -298,7 +322,7 @@ int	process_elf64(void *mapped, t_list *output, size_t file_size, char *file)
 		if (!name)
 			continue;
 
-		char type_char = get_symbol_type_x64(&sym, shdr, ehdr);
+		char type_char = is_reserved_null ? 'a' : get_symbol_type_x64(&sym, shdr, ehdr);
 		t_header *header = malloc(sizeof(*header));
 		if (!header)
 			return error("fatal", "malloc allocation failed", 0);

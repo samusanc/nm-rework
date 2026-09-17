@@ -161,12 +161,23 @@ int	process_elf32(void *mapped, t_list *output, size_t file_size, char *file)
 	for (size_t i = 0; i < num_symbols; i++) {
 		Elf32_Sym sym = symbols[i];
 		unsigned char st_type = ELF32_ST_TYPE(sym.st_info);
+		/* Mirror of the same check in src/x64/x64_utils.c -- see there
+		   for the full explanation. Real nm's -a output surfaces the
+		   reserved index-0 symtab entry as an empty-named absolute
+		   symbol for linked files (exe/.so) but not for plain
+		   relocatable .o files, verified against real 32-bit
+		   exe/.o/.so builds. */
+		int is_reserved_null = (i == 0 && sym.st_name == 0 && sym.st_value == 0
+			&& sym.st_shndx == SHN_UNDEF && st_type == STT_NOTYPE
+			&& ehdr->e_type != ET_REL);
 
 		const char *name;
 		if (st_type == STT_SECTION) {
 			if (sym.st_shndx >= ehdr->e_shnum)
 				continue;
 			name = safe_str(shstrtab, shdr[sym.st_shndx].sh_name, shstrtab_size);
+		} else if (is_reserved_null) {
+			name = "";
 		} else {
 			if (sym.st_name == 0)
 				continue;
@@ -175,7 +186,7 @@ int	process_elf32(void *mapped, t_list *output, size_t file_size, char *file)
 		if (!name)
 			continue;
 
-		char type_char = get_symbol_type_x86(&sym, shdr, ehdr);
+		char type_char = is_reserved_null ? 'a' : get_symbol_type_x86(&sym, shdr, ehdr);
 		t_header *header = malloc(sizeof(*header));
 		if (!header)
 			return error("fatal", "malloc allocation failed", 0);
