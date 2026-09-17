@@ -47,12 +47,17 @@ char	get_symbol_type_x86(Elf32_Sym *sym, Elf32_Shdr *shdrs, Elf32_Ehdr *ehdr);
 void	parse_flag(t_flags *result, char *str);
 t_flags	parse_flags(char **argv);
 void	*free_header(void *ptr);
-char	*convert_addr(int addr, int is_64);
+/* was `convert_addr(int addr, ...)`: t_header.addr is a 64-bit size_t,
+   so passing it through an `int` parameter silently truncated the top
+   32 bits of every real address before it was even printed. */
+char	*convert_addr(size_t addr, int is_64);
 void	print_content(t_header *content, int is_64, char flag);
 void	print_list(t_list *list, int order, int is_64, char flag);
 int		ft_strcmpl(const char *s1, const char *s2);
 void	sort_list(t_list *list);
 int		process_elf64(void *mapped, t_list *output, size_t file_size, char *file);
 int		process_elf32(void *mapped, t_list *output, size_t file_size, char *file);
+/* new: see its definition in src/utils/utils.c for why it exists. */
+const char	*safe_str(const char *base, size_t offset, size_t table_size);
 
 #endif

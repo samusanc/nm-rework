@@ -115,6 +115,62 @@ int ft_strcmpl(const char *s1, const char *s2)
     return 0;
 }
 
+/*
+	NEW FUNCTION -- did not exist in the intra submission.
+
+	WHY IT'S NEEDED
+	----------------
+	Every symbol/section name in this program is resolved as
+	`table_base + file_supplied_offset`, then handed to something that
+	scans for a NUL byte (ft_strcmp() to compare a section name,
+	ft_strdup() to copy a symbol name). Before this helper existed, that
+	offset was used completely raw in src/x64/x64_utils.c and
+	src/x86/x86_utlis.c: no check that it was even inside the table, and
+	no check that a NUL terminator existed before the table (or the
+	mapping) ran out. Two distinct ways to walk off the end of the
+	mmap'd file:
+	  1. `offset >= table_size` -- the offset itself points past the
+	     table (or past the whole file).
+	  2. the string at a VALID offset is simply never terminated before
+	     the table's real size runs out (an unterminated string right at
+	     the edge of the file). The bin/unterminated_string test fixture
+	     exists specifically to exercise this.
+	safe_str() checks both before ever returning a pointer: it rejects
+	an out-of-range offset outright, and it uses memchr() bounded by
+	`table_size - offset` (never scanning past the table) to prove a
+	NUL exists before handing back a pointer at all.
+
+	SUBJECT COMPLIANCE
+	-------------------
+	"Be cautious. There are many ways to lead your program out of the
+	mapped content, may it be with non-null terminated string, incorrect
+	offsets... Check everything." -- this sentence is close to a literal
+	spec for this one function: it exists to check exactly the two
+	things it names, "non-null terminated string" and "incorrect
+	offsets", in one place instead of trusting every call site to get it
+	right individually.
+
+	OLD vs NEW
+	----------
+	Old: `const char *name = shstrtab + shdr[i].sh_name;` (and similarly
+	     for symbol names) -- raw pointer arithmetic, no validation.
+	New: `const char *name = safe_str(shstrtab, shdr[i].sh_name,
+	     shstrtab_size);` -- returns NULL (silently skipped by the
+	     caller) instead of a wild pointer for anything that fails
+	     either check.
+*/
+const char	*safe_str(const char *base, size_t offset, size_t table_size)
+{
+	size_t	remaining;
+
+	if (!base || offset >= table_size)
+		return (NULL);
+	remaining = table_size - offset;
+	if (!memchr(base + offset, '\0', remaining))
+		return (NULL);
+	return (base + offset);
+}
+
 void	sort_list(t_list *list)
 {
 	t_node	*tmp1;
