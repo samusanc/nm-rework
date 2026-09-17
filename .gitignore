@@ -1,0 +1,14 @@
+objects/
+ft_nm
+a.out
+.mandatory
+.clean
+.make_submodules
+libft/libft.a
+libft/*.o
+libft/GNL/*.o
+libft/list/*.o
+libft/printf/*.o
+libft/printf/src/*.o
+libft/main/*.o
+intra_repo/
