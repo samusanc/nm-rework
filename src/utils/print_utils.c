@@ -12,23 +12,66 @@
 
 #include "ft_nm.h"
 
-char	*convert_addr(int addr, int is_64)
+/*
+	WHY THIS CHANGED
+	-----------------
+	Old signature was `convert_addr(int addr, int is_64)` and it called
+	`ft_itoa(addr)` -- ft_itoa() is a DECIMAL integer-to-string
+	converter. Every nonzero symbol address in the entire program's
+	output was printed in base 10 instead of base 16. Proven directly
+	against real `nm` on bin/libmy_library.so:
+
+	    real nm:  0000000000003e08 d _DYNAMIC
+	    old ft_nm: 0000000000015880 d _DYNAMIC
+
+	  0x3e08 (hex) == 15880 (decimal) -- the exact same number, wrong
+	  base. This survived the ENTIRE original test suite because both
+	  tester.sh and diff.sh stripped the address column before diffing
+	  (`awk '{print $2, $3}'` / `parts[1:3]`), so the tests only ever
+	  compared the type letter and the name, never the address. See the
+	  matching fix to tester.sh/diff.sh in this same series of commits.
+
+	  Stacked on top: the parameter was `int addr`, but the real value
+	  (t_header.addr, see includes/ft_nm.h) is a 64-bit `size_t`. Every
+	  call was truncating the top 32 bits of the address before even
+	  reaching the (also-wrong) decimal conversion.
+
+	SUBJECT COMPLIANCE
+	-------------------
+	"Output is to be similar to nm on the symbols list (order, offset,
+	padding...)." -- the address IS the offset. Printing it in the wrong
+	numeric base isn't a cosmetic difference, it's the output being
+	factually wrong for every single symbol that isn't at address 0.
+
+	OLD vs NEW
+	----------
+	Old: `int addr` parameter (truncates 64-bit addresses) fed through
+	     `ft_itoa()` (decimal) and hand-padded into fixed-width buffers.
+	New: `size_t addr` parameter (no truncation), converted digit-by-
+	     digit into hex nibbles directly into a correctly-sized,
+	     zero-padded buffer (16 hex digits for 64-bit, 8 for 32-bit,
+	     matching real nm's column width exactly).
+*/
+char	*convert_addr(size_t addr, int is_64)
 {
-	char	str_64[17];
-	char	str_86[9];
+	static const char	digits[] = "0123456789abcdef";
+	int					width;
+	char				*buf;
+	int					i;
 
-	ft_memset(str_64, '0', sizeof(str_64));
-	ft_memset(str_86, '0', sizeof(str_86));
-
-	char	*nbr = ft_itoa(addr);
-	if (!nbr)
+	width = is_64 ? 16 : 8;
+	buf = malloc(width + 1);
+	if (!buf)
 		return (NULL);
-	str_64[16 - ft_strlen(nbr)] = '\0';
-	str_86[8 - ft_strlen(nbr)] = '\0';
-	if (is_64)
-		return (ft_strjoin(ft_strdup(str_64), nbr));
-	else
-		return (ft_strjoin(ft_strdup(str_86), nbr));
+	i = width - 1;
+	while (i >= 0)
+	{
+		buf[i] = digits[addr & 0xf];
+		addr >>= 4;
+		i--;
+	}
+	buf[width] = '\0';
+	return (buf);
 }
 
 void	print_content(t_header *content, int is_64, char flag)
