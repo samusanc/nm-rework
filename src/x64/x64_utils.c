@@ -59,12 +59,27 @@ char	get_symbol_type_x64(Elf64_Sym *sym, Elf64_Shdr *shdrs, Elf64_Ehdr *ehdr)
 	unsigned bind = ELF64_ST_BIND(sym->st_info);
     unsigned type = ELF64_ST_TYPE(sym->st_info);
 
-    if (sym->st_shndx == SHN_UNDEF)
-        return bind == STB_WEAK ? 'w' : 'U';
-    if (sym->st_shndx == SHN_ABS)
-        return bind == STB_LOCAL ? 'a' : 'A';
+    /* Same precedence as binutils' bfd_decode_symclass(): common, undefined
+       (weak object 'v', other weak 'w'), GNU ifunc 'i', weak ('V' object,
+       'W' other), GNU unique 'u', and only then the per-section letters.
+       The old code returned 'W' for every defined weak symbol (real nm says
+       'V' for weak data) and 'T' for ifunc symbols (real nm says 'i'). */
     if (sym->st_shndx == SHN_COMMON)
         return bind == STB_LOCAL ? 'c' : 'C';
+    if (sym->st_shndx == SHN_UNDEF)
+    {
+        if (bind == STB_WEAK)
+            return type == STT_OBJECT ? 'v' : 'w';
+        return 'U';
+    }
+    if (type == STT_GNU_IFUNC)
+        return 'i';
+    if (bind == STB_WEAK)
+        return type == STT_OBJECT ? 'V' : 'W';
+    if (bind == STB_GNU_UNIQUE)
+        return 'u';
+    if (sym->st_shndx == SHN_ABS)
+        return bind == STB_LOCAL ? 'a' : 'A';
     if (sym->st_shndx >= ehdr->e_shnum)
         return '?';
 
@@ -88,9 +103,6 @@ char	get_symbol_type_x64(Elf64_Sym *sym, Elf64_Shdr *shdrs, Elf64_Ehdr *ehdr)
             c = ft_tolower(c);
         return c;
     }
-
-    if (bind == STB_WEAK)
-        return sym->st_shndx == SHN_UNDEF ? 'w' : 'W';
 
     {
         char c = '?';
@@ -280,28 +292,14 @@ int	process_elf64(void *mapped, t_list *output, size_t file_size, char *file)
 	for (size_t i = 0; i < num_symbols; i++) {
 		Elf64_Sym sym = symbols[i];
 		unsigned char st_type = ELF64_ST_TYPE(sym.st_info);
-		/*
-			WHY THIS CHECK EXISTS
-			-----------------------
-			Index 0 of every ELF symtab is a reserved, all-zero "null"
-			entry (name/value/size/info all 0, st_shndx == SHN_UNDEF).
-			Under normal (non -a) output it's correctly invisible --
-			it falls into the `sym.st_name == 0 -> continue` branch
-			below like any other nameless symbol. But real nm's -a
-			flag ("Display debugger-only symbols") surfaces this exact
-			entry as an empty-named ABSOLUTE symbol ('a'), not as 'U'
-			(which is what get_symbol_type_x64() would normally return
-			for SHN_UNDEF + STB_LOCAL). This is a libbfd implementation
-			quirk, not something derivable from the ELF spec, and it
-			ONLY happens for linked files (exe/.so) -- verified against
-			real nm that a plain relocatable .o does NOT get this
-			extra line under -a. Reproduced/matched by diffing
-			`nm -a` against `ft_nm -a` on real 32-bit and 64-bit
-			exe/.o/.so files until every one matched byte-for-byte.
-		*/
-		int is_reserved_null = (i == 0 && sym.st_name == 0 && sym.st_value == 0
-			&& sym.st_shndx == SHN_UNDEF && st_type == STT_NOTYPE
-			&& ehdr->e_type != ET_REL);
+		/* Entry 0 of every symtab is the mandatory all-zero placeholder. GNU nm
+		   never lists it (bfd starts at index 1). The old code special-cased it as
+		   an empty-named 'a' for linked files to imitate the nameless STT_FILE
+		   symbol that ld emits; that put the line in the wrong place under
+		   `-a -p` and was wrong for any file without such a symbol. The real
+		   nameless FILE symbol is now just handled like any other FILE symbol. */
+		if (i == 0)
+			continue;
 
 		const char *name;
 		if (st_type == STT_SECTION) {
@@ -310,10 +308,8 @@ int	process_elf64(void *mapped, t_list *output, size_t file_size, char *file)
 			if (sym.st_shndx >= ehdr->e_shnum)
 				continue;
 			name = safe_str(shstrtab, shdr[sym.st_shndx].sh_name, shstrtab_size);
-		} else if (is_reserved_null) {
-			name = "";
 		} else {
-			if (sym.st_name == 0)
+			if (sym.st_name == 0 && st_type != STT_FILE)
 				continue;
 			/* safe_str() instead of raw `strtab + sym.st_name`: see
 			   point (3) in the comment above this function. */
@@ -322,13 +318,14 @@ int	process_elf64(void *mapped, t_list *output, size_t file_size, char *file)
 		if (!name)
 			continue;
 
-		char type_char = is_reserved_null ? 'a' : get_symbol_type_x64(&sym, shdr, ehdr);
+		char type_char = get_symbol_type_x64(&sym, shdr, ehdr);
 		t_header *header = malloc(sizeof(*header));
 		if (!header)
 			return error("fatal", "malloc allocation failed", 0);
 		ft_bzero(header, sizeof(*header));
 		header->addr      = sym.st_value;
 		header->type_char = type_char;
+		header->debug     = st_type == STT_FILE || st_type == STT_SECTION;
 		header->name      = ft_strdup(name);
 		if (!header->name)
 		{

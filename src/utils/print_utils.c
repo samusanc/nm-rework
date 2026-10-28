@@ -77,10 +77,10 @@ char	*convert_addr(size_t addr, int is_64)
 void	print_content(t_header *content, int is_64, char flag)
 {
 	if (flag != 'a')
-		if (content->type_char == 'a' || content->type_char == 'A' || content->type_char == 'N' || content->name[0] == '.')
+		if (content->debug || content->type_char == 'N' || content->name[0] == '.')
 			return ;
 	if (flag == 'u')
-		if (content->type_char != 'U' && content->type_char != 'w')
+		if (content->type_char != 'U' && content->type_char != 'w' && content->type_char != 'v')
 			return ;
 	if (flag == 'g')
 		if (content->type_char == 't' || content->type_char == 'd' || content->type_char == 'b' || content->type_char == 'r')
@@ -122,7 +122,7 @@ void	print_content(t_header *content, int is_64, char flag)
 		     closed set, per the ELF spec: only undefined symbols lack
 		     a meaningful value).
 	*/
-	if (content->type_char != 'U' && content->type_char != 'w')
+	if (content->type_char != 'U' && content->type_char != 'w' && content->type_char != 'v')
 	{
 		if (ft_strcmp(content->name, ".comment") == 0)
 			content->type_char = 'n';

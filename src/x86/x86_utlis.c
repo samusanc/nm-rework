@@ -38,12 +38,27 @@ char	get_symbol_type_x86(Elf32_Sym *sym, Elf32_Shdr *shdrs, Elf32_Ehdr *ehdr)
 	unsigned bind = ELF32_ST_BIND(sym->st_info);
     unsigned type = ELF32_ST_TYPE(sym->st_info);
 
-    if (sym->st_shndx == SHN_UNDEF)
-        return bind == STB_WEAK ? 'w' : 'U';
-    if (sym->st_shndx == SHN_ABS)
-        return bind == STB_LOCAL ? 'a' : 'A';
+    /* Same precedence as binutils' bfd_decode_symclass(): common, undefined
+       (weak object 'v', other weak 'w'), GNU ifunc 'i', weak ('V' object,
+       'W' other), GNU unique 'u', and only then the per-section letters.
+       The old code returned 'W' for every defined weak symbol (real nm says
+       'V' for weak data) and 'T' for ifunc symbols (real nm says 'i'). */
     if (sym->st_shndx == SHN_COMMON)
         return bind == STB_LOCAL ? 'c' : 'C';
+    if (sym->st_shndx == SHN_UNDEF)
+    {
+        if (bind == STB_WEAK)
+            return type == STT_OBJECT ? 'v' : 'w';
+        return 'U';
+    }
+    if (type == STT_GNU_IFUNC)
+        return 'i';
+    if (bind == STB_WEAK)
+        return type == STT_OBJECT ? 'V' : 'W';
+    if (bind == STB_GNU_UNIQUE)
+        return 'u';
+    if (sym->st_shndx == SHN_ABS)
+        return bind == STB_LOCAL ? 'a' : 'A';
     if (sym->st_shndx >= ehdr->e_shnum)
         return '?';
 
@@ -67,9 +82,6 @@ char	get_symbol_type_x86(Elf32_Sym *sym, Elf32_Shdr *shdrs, Elf32_Ehdr *ehdr)
             c = ft_tolower(c);
         return c;
     }
-
-    if (bind == STB_WEAK)
-        return sym->st_shndx == SHN_UNDEF ? 'w' : 'W';
 
     {
         char c = '?';
@@ -161,38 +173,36 @@ int	process_elf32(void *mapped, t_list *output, size_t file_size, char *file)
 	for (size_t i = 0; i < num_symbols; i++) {
 		Elf32_Sym sym = symbols[i];
 		unsigned char st_type = ELF32_ST_TYPE(sym.st_info);
-		/* Mirror of the same check in src/x64/x64_utils.c -- see there
-		   for the full explanation. Real nm's -a output surfaces the
-		   reserved index-0 symtab entry as an empty-named absolute
-		   symbol for linked files (exe/.so) but not for plain
-		   relocatable .o files, verified against real 32-bit
-		   exe/.o/.so builds. */
-		int is_reserved_null = (i == 0 && sym.st_name == 0 && sym.st_value == 0
-			&& sym.st_shndx == SHN_UNDEF && st_type == STT_NOTYPE
-			&& ehdr->e_type != ET_REL);
+		/* Entry 0 of every symtab is the mandatory all-zero placeholder. GNU nm
+		   never lists it (bfd starts at index 1). The old code special-cased it as
+		   an empty-named 'a' for linked files to imitate the nameless STT_FILE
+		   symbol that ld emits; that put the line in the wrong place under
+		   `-a -p` and was wrong for any file without such a symbol. The real
+		   nameless FILE symbol is now just handled like any other FILE symbol. */
+		if (i == 0)
+			continue;
 
 		const char *name;
 		if (st_type == STT_SECTION) {
 			if (sym.st_shndx >= ehdr->e_shnum)
 				continue;
 			name = safe_str(shstrtab, shdr[sym.st_shndx].sh_name, shstrtab_size);
-		} else if (is_reserved_null) {
-			name = "";
 		} else {
-			if (sym.st_name == 0)
+			if (sym.st_name == 0 && st_type != STT_FILE)
 				continue;
 			name = safe_str(strtab, sym.st_name, strtab_size);
 		}
 		if (!name)
 			continue;
 
-		char type_char = is_reserved_null ? 'a' : get_symbol_type_x86(&sym, shdr, ehdr);
+		char type_char = get_symbol_type_x86(&sym, shdr, ehdr);
 		t_header *header = malloc(sizeof(*header));
 		if (!header)
 			return error("fatal", "malloc allocation failed", 0);
 		ft_bzero(header, sizeof(*header));
 		header->addr      = sym.st_value;
 		header->type_char = type_char;
+		header->debug     = st_type == STT_FILE || st_type == STT_SECTION;
 		header->name      = ft_strdup(name);
 		if (!header->name)
 		{

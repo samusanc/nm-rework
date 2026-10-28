@@ -162,7 +162,7 @@ static int	warn_not_ordinary(char *file)
 {
 	write(2, "nm: Warning: '", 14);
 	write(2, file, ft_strlen(file));
-	write(2, "' is not an ordinary file\n", 27);
+	write(2, "' is not an ordinary file\n", 26);
 	return 1;
 }
 

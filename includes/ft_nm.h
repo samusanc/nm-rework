@@ -21,11 +21,20 @@
 # include <stdlib.h>
 # include <string.h>
 # include <elf.h>
+
+/* present in glibc's <elf.h>; guarded for other libcs */
+# ifndef STB_GNU_UNIQUE
+#  define STB_GNU_UNIQUE 10
+# endif
+# ifndef STT_GNU_IFUNC
+#  define STT_GNU_IFUNC 10
+# endif
 # include "libft.h"
 
 typedef	struct s_header{
 	size_t	addr;
 	char	type_char;
+	int		debug;	/* file/section/reserved symbol: only shown with -a */
 	char	*name;
 }	t_header;
 

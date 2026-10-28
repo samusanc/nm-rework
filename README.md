@@ -1,4 +1,74 @@
-# ft_nm — hardening notes
+# ft_nm
+
+A from-scratch recode of GNU `nm` for ELF32 / ELF64 object files, executables
+and shared libraries (42 project). Supported options: `-a -g -u -r -p`.
+
+## Quick start
+
+```sh
+make                       # builds ./ft_nm  (-Wall -Wextra -Werror, no warnings)
+./ft_nm /bin/ls            # same output as: nm /bin/ls
+./ft_nm -a -r a.out b.o    # options and several files work like nm
+```
+
+### Run the tests
+
+Everything is one command and the exit status is 0 only if **all** checks pass.
+Pick whichever applies; the Docker route needs nothing installed but Docker.
+
+```sh
+docker compose run --rm nm        # pinned Debian image (gcc, 32-bit toolchain, GNU nm 2.44)
+make docker-test                  # same thing
+make test                         # on a Linux machine with gcc, make, nm, python3
+bash tests/run_tests.sh --quick   # smaller corpus, fewer fuzz rounds (~1.5 min; full run ~3 min)
+bash tests/run_tests.sh --no-fuzz # skip the sanitizer build + fuzzing
+docker compose run --rm nm bash   # an interactive shell in the same image
+```
+
+A good run ends with `RESULT: PASS` (a `[warn]` for the *empty file* case is
+expected, see below). What `tests/run_tests.sh` checks:
+
+1. **build**: warning-free; a *fresh clone* (only git-tracked files) really
+   produces `ft_nm`; touching a source file relinks.
+2. **byte-exact diff vs the system `nm`** (stdout, stderr and exit status) for
+   `-a -g -u -r -p` and combinations, over fixtures that contain every symbol
+   class (`T t D d B b R r A C W V w v i`, TLS, custom sections, ctors; 64- and
+   32-bit; `.o`, executable, shared lib, stripped), the committed `bin/`
+   fixtures, and ~150 real system binaries and libraries.
+3. **edge cases**: missing file, empty file, directory, text file, truncated
+   ELF, FIFO (must not block), `/dev/null`, several files, bad option.
+4. **fuzzing**: ~1000 corrupted ELFs (`tests/fuzz.py`) against an ASan + UBSan
+   build; any crash, hang or sanitizer report fails the run.
+
+Notes for an automated agent: run `docker compose run --rm nm`, read the last
+lines, and treat a non-zero exit status or `RESULT: FAIL` as failure. Failing
+comparisons print the first lines of the `diff` (`<` = real nm, `>` = ft_nm).
+
+**Known, accepted differences**
+* *Empty file*: `nm` 2.44 prints nothing, ft_nm prints
+  `file format not recognized`. GNU nm's behaviour here may differ between
+  binutils versions, so it is reported as a warning, not a failure.
+* Hostile offsets can make ELF structs *misaligned*. Harmless on x86 (no fault,
+  no wrong output), so the fuzz build uses `-fno-sanitize=alignment`.
+* Only ELF32/ELF64 is supported (what the subject asks for), not `.a` archives.
+
+### Repository layout
+
+| path | what |
+|---|---|
+| `src/`, `includes/`, `libft/` | the program |
+| `tests/run_tests.sh` | the whole test suite (see above) |
+| `tests/fixtures/rich.c` | source of the symbol-class fixtures |
+| `tests/fuzz.py` | corrupted-ELF fuzzer |
+| `bin/` | small committed ELF fixtures used as test inputs |
+| `docker/`, `docker-compose.yml` | pinned Debian test image |
+| `intra_repo/` | the original submission, untouched, for comparison |
+
+Debug build with sanitizers: `CFLAGS='-fsanitize=address,undefined -g -Wall -Wextra' make -e re`.
+
+---
+
+# Hardening notes
 
 This repo passed defense on the intra version. This README is a post-defense
 learning pass: every crash, hang, and correctness bug found by auditing the
@@ -494,3 +564,43 @@ In rough priority order:
    at least once. A few thousand symbols is nothing for a real binary and
    immediately surfaces algorithmic complexity bugs that small test files
    never will (#10).
+
+---
+
+## 11. The Makefile never linked `ft_nm` on a fresh clone
+
+`.mandatory` and `.make_submodules` (empty "already done" sentinel files) were
+**committed to git**, together with 50 compiled `libft/*.o`. On a fresh clone
+`make` therefore compiled the objects, printed `mandatory done...`, and never
+linked: no `ft_nm` at all. Editing a source file after a build had the same
+problem (objects rebuilt, binary not relinked, so a stale binary kept running),
+and `make clean` could silently do nothing because of a `.clean` sentinel.
+**Fix:** real file dependencies (`ft_nm: $(OBJS) libft.a`), no sentinels, the
+committed artifacts removed, `.gitattributes` pinning LF. `tests/run_tests.sh`
+builds from a copy of the git-tracked files to catch this class of bug.
+**Lesson:** test the build the way an evaluator gets it: from a clean clone.
+
+## 12. Symbol letters: weak data, ifunc, absolute, and `-a -p`
+
+Found by diffing against real `nm` on a fixture with every symbol class
+(`tests/fixtures/rich.c`); all four passed the old tests unnoticed.
+* a defined weak **object** printed `W`; real nm prints `V` (weak function `W`,
+  undefined weak object `v`, undefined weak function `w`);
+* a GNU **ifunc** printed `T`; real nm prints `i` (and `u` for GNU unique);
+* a global **absolute** symbol (`A`) was hidden without `-a`: it was filtered by
+  letter because file symbols are also `a`. Debug-only symbols (`STT_FILE`,
+  `STT_SECTION`) are now flagged explicitly and hidden unless `-a`;
+* the reserved index-0 entry was special-cased as an empty-named `a` line for
+  linked files. Real nm just skips entry 0; the line it prints is the nameless
+  `STT_FILE` symbol `ld` emits. Position only mattered under `-a -p`.
+
+The classification now follows binutils' `bfd_decode_symclass` order (common,
+undefined, ifunc, weak, unique, absolute, section letters).
+
+## 13. A stray NUL byte after `is not an ordinary file`
+
+`write(2, "' is not an ordinary file
+", 27)`: the literal is 26 bytes, so the
+terminating NUL went to stderr too (FIFOs, devices, `/dev/null`). Invisible on a
+terminal, visible to `cmp`. Found because the byte-exact suite compares
+stdout+stderr with `cmp` instead of eyeballing or slicing columns.

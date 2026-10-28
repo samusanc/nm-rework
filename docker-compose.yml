@@ -1,6 +1,12 @@
+# docker compose build
+# docker compose run --rm nm          # full test suite (same as `make docker-test`)
+# docker compose run --rm nm bash     # interactive shell in the pinned toolchain
+# The working copy is bind-mounted at /app: edit on the host, re-run, no rebuild.
 services:
   nm:
-    container_name: nm
     build: ./docker
+    image: ft_nm-test
+    working_dir: /app
     volumes:
       - ./:/app
+    command: ["bash", "tests/run_tests.sh"]

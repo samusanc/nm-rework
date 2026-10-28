@@ -1,0 +1,14 @@
+# Pin LF: a CRLF checkout (core.autocrlf=true on Windows) breaks Makefiles and
+# shell scripts as soon as they are bind-mounted into a Linux container.
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.o binary
+*.so binary
+*.a binary

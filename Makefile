@@ -60,49 +60,58 @@ $(O_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) $(INC) -g -c $< -o $(O_DIR)/$(<:.c=.o)
 
-all: submodules $(NAME)
+# Every target below is a real file or a phony rule. This Makefile used to
+# track "already built" state with empty sentinel files (.mandatory,
+# .make_submodules, .clean) that were committed to git: on a fresh clone the
+# link step was skipped, so `make` printed "mandatory done..." and produced no
+# ft_nm at all. Sentinels are gone; make's own timestamps decide what to do.
 
-$(NAME): submodules $(OBJS) .mandatory
+all: $(NAME)
+
+$(NAME): $(OBJS) $(SUBMODLIB)
+	$(CC) -o $(NAME) $(OBJS) $(SUBMODLIB)
 	@echo "mandatory done..."
+
+# a header change must rebuild every object
+$(OBJS): includes/ft_nm.h
 
 #============================= SUBMODULES =============================#
 
-submodules: .make_submodules
-	@echo "All submodules loaded..."
+LIBFT_SRCS	= $(wildcard libft/*.c libft/*/*.c libft/*.h libft/*/*.h)
 
-.make_submodules: 
+$(SUBMODLIB): $(LIBFT_SRCS)
 	@make -sC ./libft/ all
-	@touch .make_submodules
 
-#======================= MANDATORY AND BONUS =========================#
+submodules: $(SUBMODLIB)
 
-.mandatory:
-	$(CC) -o $(NAME) $(OBJS) $(SUBMODLIB)
-	@touch .mandatory
+#=========================== CLEAN / RE ==============================#
 
 re: fclean all
 
 fclean: clean
 	@echo "cleaning binaries..."
 	@rm -f $(NAME)
-	@rm -rf .mandatory
-	@rm -rf .make_submodules
-	@rm -rf .clean
+	@make -sC ./libft/ fclean
 
 submodule_fclean:
 	@make -sC ./libft/ fclean
 
-clean: .clean
+clean:
+	@echo "cleaning objects..."
+	@make -sC ./libft/ clean
+	@rm -rf $(O_DIR)
 	@echo "objects removed!"
 
-.clean: .submodule_clean
-	@echo "cleaning objects..."
-	@rm -f $(OBJS)
-	@rm -rf $(O_DIR)
-	@touch .clean
+#============================== TESTS ================================#
 
-.submodule_clean:
-	@make -sC ./libft/ clean
+# Full suite (build, byte-exact diff against the system nm, edge cases,
+# corrupted-ELF fuzzing). See tests/run_tests.sh and the README quick start.
+test: all
+	@bash tests/run_tests.sh
+
+# Same suite inside the pinned Docker image (no local toolchain needed).
+docker-test:
+	$(COMPOSE) run --rm nm
 
 #============================  DOCKER  ===============================#
 
@@ -143,4 +152,4 @@ docker-clean: stop
 	fi
 
 
-.PHONY: all clean fclean re title submodules submodule_fclean docker docker-clean docker-fclean docker-re stop down up build delvol
+.PHONY: all clean fclean re test docker-test submodules submodule_fclean docker docker-clean docker-fclean docker-re stop down up build delvol
